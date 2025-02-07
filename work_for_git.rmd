@@ -1,0 +1,363 @@
+---
+title: "Projet d'apprentissage statistique"
+author: "Oguz Gurler"
+date: "2023-11-22"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(caret)
+```
+
+**Introduction**
+
+Pour ce projet d'apprentissage statistique, nous allons travailler sur des données du secteur de la santé, plus précisément celles qui concernent la cyphose (kyphosis en anglais). La cyphose est une courbure anormale de la colonne vertébrale qui cause une bosse (plus d'informations sur **https://fr.wikipedia.org/wiki/Cyphose**).
+Pour cela, nous allons utiliser le jeu de données **kyphosis** qui se trouve dans le package **rpart**. Il contient 81 individus qui sont des enfants, et 4 variables. Ce jeu de données ne contient pas de valeurs manquantes, donc il est pratique à utiliser, surtout qu'il contient un nombre raisonnable de lignes et de colonnes. Nous allons maintenant donner des informations sur les variables:
+
+- La variable **Kyphosis** indique si l'enfant a subi une déformation de la colonne vertébrale après une opération chirurgicale;
+
+- La variable **Age** donne l'âge de l'enfant (en mois);
+
+- La variable **Number** donne le nombre de vertèbres concernées par l'opération;
+
+- La variable **Start** indique le numéro de la première vertèbre opérée.
+
+Nous avons donc 3 variables quantitatives (Age, Number et Start) et une variable qualitative binaire (Kyphosis). 
+
+Pour rappel, les vertèbres sont les os qui forment la colonne vertébrale.
+
+Dans la suite du projet, nous allons essayer de mieux comprendre ce jeu de données et d'appliquer des méthodes d'apprentissage statistique pour étudier en détails les différentes variables et voir le comportement des individus.
+
+```{r}
+library(rpart)
+data(kyphosis)
+donnees = kyphosis
+```
+
+```{r}
+print(head(donnees))
+str(donnees)
+```
+
+
+```{r}
+table(donnees$Kyphosis)
+```
+
+On remarque que dans la majorité des cas, les enfants ne subissent pas de cyphose après une opération chirurgicale. Cependant, il y a quand même une quantité non négligeable d'enfants qui ont une cyphose après une opération. 
+
+On se demande si l'on peut expliquer ceci par l'âge de l'enfant, le nombre de vertèbres concernées par l'opération et le numéro de la première vertèbre opérée.
+
+Le but va être d'utiliser des méthodes d'apprentissage supervisé pour essayer de prédire si à la suite d'une opération de la colonne vertébrale, un enfant développera une cyphose ou pas. Nous allons utiliser 3 méthodes qui sont l'arbre de décision, la régression logistique et la machine à vecteurs de support. On pourra également comparer ces méthodes pour voir laquelle est la plus efficace.
+
+**Partie 1: Arbre de décision**
+
+On commence par l'arbre de décision. On va d'abord diviser nos données en ensemble d'entraînement (70 %) et ensemble de test (30%), puis on va entraîner le modèle sur l'ensemble d'entraînement et le tester sur l'ensemble test pour voir son efficacité.
+
+```{r}
+set.seed(123)
+train_indices = sample(nrow(donnees),nrow(donnees)*0.7)
+train_data = donnees[train_indices,]
+test_data = donnees[-train_indices,]
+```
+
+
+```{r}
+tree_model = rpart(Kyphosis ~ ., data=train_data,method="class")
+```
+
+```{r}
+plot(tree_model, uniform=TRUE,margin=0.1,main="Arbre de décision")
+text(tree_model, use.n=TRUE, pretty=0, all=TRUE)
+```
+
+Cette arbre a 2 feuilles. La seule variable explicative qui reste est **Start**. Si cette variable est supérieure ou égale à 8.5, alors dans la très grande majorité des cas, un enfant ne développe pas de cyphose après son opération. En revanche, si cette valeur est inférieure à 8.5, alors on a un peu plus d'enfants qui présentent une cyphose par rapport à ceux qui n'en présentent pas. 
+
+-> La valeur 8.5 pour la variable **Start** est très critique. C'est en fait ici que se concentre principalement l'information pour pouvoir prédire si un enfant sera atteint par le problème de la cyphose.
+
+Nous allons maintenant utiliser ce modèle sur l'échantillon test.
+
+```{r}
+predictions = predict(tree_model, newdata=test_data, type="class")
+predictions
+```
+
+On peut évaluer les performances du modèle en affichant la matrice de confusion:
+
+```{r}
+confusion_matrix = table(test_data$Kyphosis, predictions)
+print(confusion_matrix)
+```
+
+On voit que sur les 25 enfants de l'échantillon test, le modèle a réussi à prévoir 19 cas sans faire d'erreurs. Il a prédit que 2 enfants n'auront pas de cyphose alors qu'en réalité, ils sont atteints par ce problème. Il a également prédit que 4 enfants développeront ce problème alors qu'en réalité, la cyphose est absente.
+
+Nous avons donc une précision de 76 % pour ce modèle, ce qui est satisfaisant.
+
+**Conclusion sur l'arbre de décision:**
+
+On conclut que ce modèle est efficace et qu'il a une bonne capacité de généralisation sur de nouveaux individus inconnus.
+
+
+
+**Partie 2: Régression logistique**
+
+Dans cette seconde partie, nous allons utiliser la méthode de régression logistique pour prédire si un enfant aura une cyphose ou pas.
+
+On commence par rajouter une colonne à notre data frame. Cette colonne contient les valeurs 0 si l'enfant n'est pas atteint par la maladie et 1 sinon. Ceci ne change rien aux données.
+
+
+```{r}
+library(tidyverse)
+donnees <- donnees %>%
+  mutate(num_cyphose = ifelse(Kyphosis=="absent", 0,1)) %>%
+  mutate(num_cyphose = as.numeric(num_cyphose))
+```
+
+```{r}
+head(donnees)
+```
+On va diviser les données en 2 parties: 70 % pour l'échantillon d'entraînement et 30 % pour l'échantillon test en faisant attention que l'on ait les mêmes échantillons que pour l'arbre de décision, ceci pour comparer les performances des méthodes:
+
+```{r}
+set.seed(123)
+smp_size = floor(0.7 * nrow(donnees))
+train_ind = sample(seq_len(nrow(donnees)), size=smp_size)
+```
+
+```{r}
+train = donnees[train_ind,]
+test = donnees[-train_ind,]
+```
+
+On paramètre le modèle en spécifiant la méthode de validation croisée: on choisit K = 5, on a donc une validation croisée 5-fold.
+
+```{r}
+# On paramètre le modèle
+fitControl = trainControl(method="cv", number=5,savePredictions = TRUE)
+```
+
+On entraîne le modèle sur l'échantillon d'entraînement.
+
+```{r}
+lr_model = train(factor(num_cyphose) ~ Age+Number+Start, data=train, method="glm", family=binomial(), trControl=fitControl)
+```
+
+On peut visualiser les résultats de la régression logistique:
+
+```{r}
+summary(lr_model)
+```
+
+- On remarque que seul le numéro de la première vertèbre opérée a une influence significative sur le fait qu'un enfant est atteint par la cyphose ou pas (car la p-valeur est petite). Comme le coefficient est négatif, on peut dire que plus le numéro de la première vertèbre opérée est grand, plus le risque de développer une cyphose diminue.
+
+- On remarque aussi que l'âge et le nombre de vertèbres opérées n'ont pas d'impacts significatifs sur le développement de la maladie.
+
+-> On se retrouve dans une situation très similaire que celle de l'arbre de décision, où il nous reste qu'une seule variable significative.
+
+Maintenant, nous allons utiliser le modèle sur l'échantillon test et évaluer sa qualité en affichant la matrice de confusion:
+
+```{r}
+prediction = predict(lr_model, newdata=test)
+prediction
+```
+
+```{r}
+mc = table(test$num_cyphose, prediction)
+confusionMatrix(mc)
+```
+
+On remarque que le modèle a une précision de 80 %, ce qui est un très bon pourcentage. On a visiblement un meilleur pourcentage de réussite que pour l'arbre de décision.
+
+**Remarque:**
+Nous avons pris K = 5 dans la méthode de validation croisée car nous avons un jeu de données pas très grand. Mais on aurait pu prendre K = 10 par exemple, or nous ne voyons pas de différences significatives entre ces deux solutions.
+
+**Conclusion sur la régression logistique**
+
+On conclut que ce modèle est très efficace et qu'il a une capacité de généralisation satisfaisante.
+
+
+
+**Partie 3: Machine à vecteurs de support (SVM)**
+
+Dans cette partie, nous allons utiliser la méthode SVM pour prédire si un enfant développera la maladie ou pas.
+
+```{r}
+library(e1071)
+library(ggplot2)
+library(dplyr)
+```
+
+
+```{r}
+set.seed(123)
+indices_train = sample(nrow(donnees), 0.7*nrow(donnees))
+data_train = donnees[indices_train,]
+data_test = donnees[-indices_train,]
+```
+
+
+```{r}
+svm_model = svm(Kyphosis ~ Age + Number + Start, data = data_train, kernel="radial", preProc=c("center","scale"), probability=TRUE)
+```
+
+```{r}
+summary(svm_model)
+```
+
+On a 27 vecteurs de support, 16 pour la première classe et 11 pour la deuxième.
+
+```{r}
+predSVM = predict(svm_model, data_test)
+predSVM
+```
+
+
+```{r}
+matrice_de_confusion = table(data_test$num_cyphose, predSVM)
+matrice_de_confusion
+```
+
+Nous avons 19 données bien classées sur 25. On a une précision de 76 % avec la méthode SVM. C'est encore une fois un pourcentage satisfaisant.
+
+On va voir si l'on peut faire mieux. On va utiliser cette fois un noyau linéaire et non radial:
+
+```{r}
+svm_model_2 = svm(Kyphosis ~ Age + Number + Start, data = data_train, kernel = "linear", preProc=c("center","scale"), probability=TRUE)
+summary(svm_model_2)
+```
+
+```{r}
+predSVM_2 = predict(svm_model_2,data_test)
+predSVM_2
+```
+
+```{r}
+mc_2 = table(data_test$num_cyphose,predSVM_2)
+mc_2
+```
+
+On a le même pourcentage de prévision qu'avec le noyau radial. On teste cette fois-ci un noyau polynomial:
+
+```{r}
+svm_model_3 = svm(Kyphosis ~ Age + Number + Start, data = data_train, kernel = "polynomial", preProc=c("center","scale"), probability=TRUE)
+summary(svm_model_3)
+```
+
+```{r}
+predSVM_3 = predict(svm_model_3,data_test)
+predSVM_3
+```
+
+```{r}
+mc_3 = table(data_test$num_cyphose,predSVM_3)
+mc_3
+```
+
+Cette fois, nous avons un meilleur résultat car la précision est de 80 %.
+
+Enfin, on teste un noyau sigmoïde:
+
+```{r}
+svm_model_4 = svm(Kyphosis ~ Age + Number + Start, data = data_train, kernel = "sigmoid", preProc=c("center","scale"), probability=TRUE)
+summary(svm_model_4)
+```
+
+```{r}
+predSVM_4 = predict(svm_model_4,data_test)
+predSVM_4
+```
+
+```{r}
+mc_4 = table(data_test$num_cyphose,predSVM_4)
+mc_4
+```
+
+Nous avons encore une précision de 80 %.
+
+-> On conclut que les noyaux polynomiaux et sigmoïdes sont les plus adaptés à notre situation.
+
+**Conclusion sur la méthode SVM**:
+
+Nous pouvons conclure que cette méthode est également efficace au vu des résultats. Nous avons réussi à l'améliorer en essayant différents types de noyaux.
+
+
+
+**Partie 4: Courbes ROC**
+
+Dans cette dernière partie, nous allons tracer les courbes ROC des différentes méthodes pour pouvoir les comparer. Pour la méthode SVM, on retiendra le modèle avec le noyau sigmoïde.
+
+```{r}
+library(pROC)
+```
+
+On commence par la courbe ROC pour l'arbre de décision:
+
+```{r}
+p <- predict(tree_model, test_data, type = "prob")
+p
+```
+
+
+```{r}
+roc_obj <- roc(test_data$Kyphosis, p[, "present"])
+roc_obj
+```
+
+L'aire sous la courbe (AUC) vaut 0.7281. Nous avons donc une bonne performance pour cette méthode. On représente graphiquement la courbe ROC:
+
+```{r}
+plot(roc_obj, main = "Courbe ROC pour l'arbre de décision", col = "blue")
+legend("bottomright", legend = "Arbre de décision", col = "blue", lty = 1)
+```
+
+On représente maintenant la courbe ROC pour la régression logistique:
+
+```{r}
+p2 <- predict(lr_model, test,type="prob")
+p2
+```
+
+```{r}
+roc_obj_2 <- roc(test$num_cyphose, p2[, "1"])
+roc_obj_2
+```
+
+```{r}
+plot(roc_obj_2, main = "Courbe ROC pour la régression logistique", col = "red")
+legend("bottomright", legend = "Régression logistique", col = "red", lty = 1)
+```
+
+L'aire sous la courbe vaut 0.7895. On conclut que ce modèle est plus efficace que l'arbre de décision.
+
+On finit par la courbe ROC de la méthode SVM:
+
+```{r}
+p3 <- predict(svm_model_4, newdata = data_test)
+p3
+```
+
+```{r}
+predictions_numeric <- ifelse(p3 == 'present', 1, 0)
+```
+
+```{r}
+roc_obj_3 <- roc(data_test$Kyphosis, predictions_numeric)
+roc_obj_3
+```
+
+```{r}
+plot(roc_obj_3, main = "Courbe ROC pour la méthode SVM", col = "green")
+legend("bottomright", legend = "Machine à vecteurs de support", col = "green", lty = 1)
+```
+
+On voit que l'AUC vaut 0.6974. Cette méthode n'est pas très efficace. Les méthodes de l'arbre de décision et la régression logistique sont plus adaptées à notre jeu de données.
+
+**Conclusion du projet**
+
+- Nous avons étudié plusieurs méthodes de classification supervisée sur le jeu de données **kyphosis**. On a d'abord utiliser la méthode de l'arbre de décision, puis la régression logistique et enfin la méthode SVM, tout ceci pour essayer de prédire si un enfant développera une cyphose ou pas, en fonction des autres variables.
+
+- Nous avons enfin comparer ces méthodes grâce aux courbes ROC. On a réussi à montrer que la meilleure des méthodes était la régression logistique, puis l'arbre de décision, et enfin la machine à vecteurs de support.
+
